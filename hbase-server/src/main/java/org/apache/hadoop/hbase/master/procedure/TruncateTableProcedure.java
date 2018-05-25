@@ -18,29 +18,29 @@
 
 package org.apache.hadoop.hbase.master.procedure;
 
-import java.io.InputStream;
+import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.hbase.classification.InterfaceAudience;
+import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotDisabledException;
 import org.apache.hadoop.hbase.TableNotFoundException;
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.exceptions.HBaseException;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
+import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
+import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.HBaseProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProcedureProtos;
 import org.apache.hadoop.hbase.protobuf.generated.MasterProcedureProtos.TruncateTableState;
-import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
-import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
 import org.apache.hadoop.hbase.util.ModifyRegionUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 
@@ -101,15 +101,16 @@ public class TruncateTableProcedure
           break;
         case TRUNCATE_TABLE_CLEAR_FS_LAYOUT:
           DeleteTableProcedure.deleteFromFs(env, getTableName(), regions, true);
+          setNextState(TruncateTableState.TRUNCATE_TABLE_CREATE_FS_LAYOUT);
           if (!preserveSplits) {
             // if we are not preserving splits, generate a new single region
             regions = Arrays.asList(ModifyRegionUtils.createHRegionInfos(hTableDescriptor, null));
           } else {
             regions = recreateRegionInfo(regions);
           }
-          setNextState(TruncateTableState.TRUNCATE_TABLE_CREATE_FS_LAYOUT);
           break;
         case TRUNCATE_TABLE_CREATE_FS_LAYOUT:
+          DeleteTableProcedure.deleteFromFs(env, getTableName(), regions, true);
           regions = CreateTableProcedure.createFsLayout(env, hTableDescriptor, regions);
           CreateTableProcedure.updateTableDescCache(env, getTableName());
           setNextState(TruncateTableState.TRUNCATE_TABLE_ADD_TO_META);
@@ -185,6 +186,9 @@ public class TruncateTableProcedure
 
   @Override
   protected boolean acquireLock(final MasterProcedureEnv env) {
+    // We will spin "fast" on a procedure executor because of this, instead of going dormant
+    // and waiting for the Master to be initialized. HBASE-14837 fixes this, but is onerous
+    // to backport.
     if (!env.isInitialized()) return false;
     return env.getProcedureQueue().tryAcquireTableWrite(getTableName(), "truncate table");
   }
@@ -296,5 +300,13 @@ public class TruncateTableProcedure
         }
       });
     }
+  }
+
+  @VisibleForTesting
+  HRegionInfo getFirstRegionInfo() {
+    if (regions == null || regions.isEmpty()) {
+      return null;
+    }
+    return regions.get(0);
   }
 }
