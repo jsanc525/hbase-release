@@ -25,6 +25,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.AdminProtos;
 import org.apache.hadoop.hbase.protobuf.generated.AuthenticationProtos.TokenIdentifier.Kind;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.MasterService;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProtos.HbckService;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProtos;
 
 /**
@@ -43,6 +44,8 @@ public class SecurityInfo {
     infos.put(MasterService.getDescriptor().getName(),
         new SecurityInfo("hbase.master.kerberos.principal", Kind.HBASE_AUTH_TOKEN));
     infos.put(RegionServerStatusProtos.RegionServerStatusService.getDescriptor().getName(),
+        new SecurityInfo("hbase.master.kerberos.principal", Kind.HBASE_AUTH_TOKEN));
+    infos.put(HbckService.getDescriptor().getName(),
         new SecurityInfo("hbase.master.kerberos.principal", Kind.HBASE_AUTH_TOKEN));
   }
 
