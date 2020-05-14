@@ -328,8 +328,8 @@ public class ReplicationSource implements ReplicationSourceInterface {
     for (Map.Entry<String, ReplicationSourceShipper> walGroupShipper : workerThreads.entrySet()) {
       String walGroupId = walGroupShipper.getKey();
       ReplicationSourceShipper shipper = walGroupShipper.getValue();
+      ageOfLastShippedOp = metrics.getAgeOfLastShippedOp(walGroupId);
       lastTimeStamp = metrics.getLastTimeStampOfWalGroup(walGroupId);
-      ageOfLastShippedOp = metrics.getAgeofLastShippedOp(walGroupId);
       int queueSize = queues.get(walGroupId).size();
       replicationDelay =
           ReplicationLoad.calculateReplicationDelay(ageOfLastShippedOp, lastTimeStamp, queueSize);
