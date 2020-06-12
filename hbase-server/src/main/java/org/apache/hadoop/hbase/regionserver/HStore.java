@@ -907,7 +907,8 @@ public class HStore implements Store, HeapSize, StoreConfigInformation, Propagat
           storeEngine.getStoreFileManager().clearCompactedFiles();
       // clear the compacted files
       if (CollectionUtils.isNotEmpty(compactedfiles)) {
-        removeCompactedfiles(compactedfiles, true);
+        removeCompactedfiles(compactedfiles, true, cacheConf != null ?
+          cacheConf.shouldEvictOnClose() : true);
       }
       if (!result.isEmpty()) {
         // initialize the thread pool for closing store files in parallel.
@@ -2566,7 +2567,7 @@ public class HStore implements Store, HeapSize, StoreConfigInformation, Propagat
         lock.readLock().unlock();
       }
       if (CollectionUtils.isNotEmpty(copyCompactedfiles)) {
-        removeCompactedfiles(copyCompactedfiles, storeClosing);
+        removeCompactedfiles(copyCompactedfiles, storeClosing, true);
       }
     } finally {
       archiveLock.unlock();
@@ -2576,9 +2577,12 @@ public class HStore implements Store, HeapSize, StoreConfigInformation, Propagat
   /**
    * Archives and removes the compacted files
    * @param compactedfiles The compacted files in this store that are not active in reads
+   * @param storeClosing
+   * @param evictOnClose true if blocks should be evicted from the cache when an HFile reader is
+   *   closed, false if not
    */
-  private void removeCompactedfiles(Collection<HStoreFile> compactedfiles, boolean storeClosing)
-      throws IOException {
+  private void removeCompactedfiles(Collection<HStoreFile> compactedfiles, boolean storeClosing,
+    boolean evictOnClose) throws IOException {
     final List<HStoreFile> filesToRemove = new ArrayList<>(compactedfiles.size());
     final List<Long> storeFileSizes = new ArrayList<>(compactedfiles.size());
     for (final HStoreFile file : compactedfiles) {
@@ -2618,8 +2622,8 @@ public class HStore implements Store, HeapSize, StoreConfigInformation, Propagat
             LOG.trace("Closing and archiving the file {}", file);
             // Copy the file size before closing the reader
             final long length = r.length();
-            r.close(true);
-            file.closeStreamReaders(true);
+            r.close(evictOnClose);
+            file.closeStreamReaders(evictOnClose);
             // Just close and return
             filesToRemove.add(file);
             // Only add the length if we successfully added the file to `filesToRemove`
