@@ -61,7 +61,7 @@ public class ReplicationSourceShipper extends Thread {
   // Last position in the log that we sent to ZooKeeper
   protected long lastLoggedPosition = -1;
   // Path of the current log
-  protected volatile Path currentPath;
+  protected volatile Path lastLoggedPath;
   // Current state of the worker thread
   private WorkerState state;
   protected ReplicationSourceWALReader entryReader;
@@ -107,6 +107,12 @@ public class ReplicationSourceShipper extends Thread {
       try {
         WALEntryBatch entryBatch = entryReader.take();
         shipEdits(entryBatch);
+        if (!entryBatch.hasMoreEntries()) {
+          LOG.debug("Finished recovering queue for group "
+            + walGroupId + " of peer " + source.getPeerClusterZnode());
+          source.getSourceMetrics().incrCompletedRecoveryQueue();
+          setWorkerState(WorkerState.FINISHED);
+        }
       } catch (InterruptedException e) {
         LOG.trace("Interrupted while waiting for next replication entry batch", e);
         Thread.currentThread().interrupt();
@@ -124,16 +130,14 @@ public class ReplicationSourceShipper extends Thread {
   protected void shipEdits(WALEntryBatch entryBatch) {
     List<Entry> entries = entryBatch.getWalEntries();
     long lastReadPosition = entryBatch.getLastWalPosition();
-    currentPath = entryBatch.getLastWalPath();
+    lastLoggedPath = entryBatch.getLastWalPath();
     int sleepMultiplier = 0;
     if (entries.isEmpty()) {
-      if (lastLoggedPosition != lastReadPosition) {
-        updateLogPosition(lastReadPosition);
-        // if there was nothing to ship and it's not an error
-        // set "ageOfLastShippedOp" to <now> to indicate that we're current
-        source.getSourceMetrics().setAgeOfLastShippedOp(EnvironmentEdgeManager.currentTime(),
-          walGroupId);
-      }
+      updateLogPosition(lastReadPosition);
+      // if there was nothing to ship and it's not an error
+      // set "ageOfLastShippedOp" to <now> to indicate that we're current
+      source.getSourceMetrics().setAgeOfLastShippedOp(EnvironmentEdgeManager.currentTime(),
+        walGroupId);
       return;
     }
     int currentSize = (int) entryBatch.getHeapSize();
@@ -223,7 +227,7 @@ public class ReplicationSourceShipper extends Thread {
   }
 
   protected void updateLogPosition(long lastReadPosition) {
-    source.getSourceManager().logPositionAndCleanOldLogs(currentPath, source.getPeerClusterZnode(),
+    source.getSourceManager().logPositionAndCleanOldLogs(lastLoggedPath, source.getPeerClusterZnode(),
       lastReadPosition, false, false);
     lastLoggedPosition = lastReadPosition;
   }
@@ -242,8 +246,12 @@ public class ReplicationSourceShipper extends Thread {
     return this.entryReader.getCurrentPath();
   }
 
-  public long getCurrentPosition() {
+  public long getLastLoggedPosition() {
     return this.lastLoggedPosition;
+  }
+
+  public Path getLastLoggedPath(){
+    return lastLoggedPath;
   }
 
   public void setWALReader(ReplicationSourceWALReader entryReader) {

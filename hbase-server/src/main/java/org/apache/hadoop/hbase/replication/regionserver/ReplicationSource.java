@@ -502,6 +502,20 @@ public class ReplicationSource extends Thread implements ReplicationSourceInterf
     return null;
   }
 
+  public Path getLastLoggedPath() {
+    for (ReplicationSourceShipper worker : workerThreads.values()) {
+      return worker.getLastLoggedPath();
+    }
+    return null;
+  }
+
+  public long getLastLoggedPosition() {
+    for (ReplicationSourceShipper worker : workerThreads.values()) {
+      return worker.getLastLoggedPosition();
+    }
+    return 0;
+  }
+
   @Override
   public boolean isSourceActive() {
     return !this.server.isStopped() && this.sourceRunning;
@@ -537,8 +551,8 @@ public class ReplicationSource extends Thread implements ReplicationSourceInterf
     for (Map.Entry<String, ReplicationSourceShipper> entry : workerThreads.entrySet()) {
       String walGroupId = entry.getKey();
       ReplicationSourceShipper worker = entry.getValue();
-      long position = worker.getCurrentPosition();
-      Path currentPath = worker.getCurrentPath();
+      long position = worker.getLastLoggedPosition();
+      Path currentPath = worker.getLastLoggedPath();
       sb.append("walGroup [").append(walGroupId).append("]: ");
       if (currentPath != null) {
         sb.append("currently replicating from: ").append(currentPath).append(" at position: ")

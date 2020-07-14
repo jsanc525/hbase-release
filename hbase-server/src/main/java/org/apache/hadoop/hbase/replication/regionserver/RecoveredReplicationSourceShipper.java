@@ -129,7 +129,7 @@ public class RecoveredReplicationSourceShipper extends ReplicationSourceShipper 
 
   @Override
   protected void updateLogPosition(long lastReadPosition) {
-    source.getSourceManager().logPositionAndCleanOldLogs(currentPath, source.getPeerClusterZnode(),
+    source.getSourceManager().logPositionAndCleanOldLogs(lastLoggedPath, source.getPeerClusterZnode(),
       lastReadPosition, true, false);
     lastLoggedPosition = lastReadPosition;
   }

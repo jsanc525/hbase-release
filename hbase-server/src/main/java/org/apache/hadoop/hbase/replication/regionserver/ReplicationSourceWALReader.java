@@ -66,7 +66,8 @@ public class ReplicationSourceWALReader extends Thread {
   // max count of each batch - multiply by number of batches in queue to get total
   protected final int replicationBatchCountCapacity;
   // position in the WAL to start reading at
-  private long currentPosition;
+  private long lastReadPosition;
+  private Path lastReadPath;
   private final long sleepForRetries;
   private final int maxRetriesMultiplier;
   private final boolean eofAutoRecovery;
@@ -91,7 +92,8 @@ public class ReplicationSourceWALReader extends Thread {
       PriorityBlockingQueue<Path> logQueue, long startPosition, WALEntryFilter filter,
       ReplicationSource source) {
     this.logQueue = logQueue;
-    this.currentPosition = startPosition;
+    this.lastReadPath = logQueue.peek();
+    this.lastReadPosition = startPosition;
     this.fs = fs;
     this.conf = conf;
     this.filter = filter;
@@ -123,7 +125,7 @@ public class ReplicationSourceWALReader extends Thread {
     int sleepMultiplier = 1;
     while (isReaderRunning()) { // we only loop back here if something fatal happened to our stream
       try (WALEntryStream entryStream =
-          new WALEntryStream(logQueue, fs, conf, currentPosition,
+          new WALEntryStream(logQueue, fs, conf, lastReadPosition,
               source.getWALFileLengthProvider(), source.getServerWALsBelongTo(),
               source.getSourceMetrics())) {
         while (isReaderRunning()) { // loop here to keep reusing stream while we can
@@ -131,18 +133,18 @@ public class ReplicationSourceWALReader extends Thread {
             continue;
           }
           WALEntryBatch batch = readWALEntries(entryStream);
-          if (batch != null && batch.getNbEntries() > 0) {
-            if (LOG.isTraceEnabled()) {
-              LOG.trace(String.format("Read %s WAL entries eligible for replication",
-                batch.getNbEntries()));
-            }
-            entryBatchQueue.put(batch);
+          updateBatch(entryStream, batch);
+          if (isShippable(batch)) {
             sleepMultiplier = 1;
-          } else { // got no entries and didn't advance position in WAL
-            handleEmptyWALEntryBatch(batch, entryStream.getCurrentPath());
+            entryBatchQueue.put(batch);
+            if (!batch.hasMoreEntries()) {
+              // we're done with queue recovery, shut ourselves down
+              setReaderRunning(false);
+            }
+          } else {
+            Thread.sleep(sleepForRetries);
           }
-          currentPosition = entryStream.getPosition();
-          entryStream.reset(); // reuse stream
+          resetStream(entryStream);
         }
       } catch (IOException e) { // stream related
         if (sleepMultiplier < maxRetriesMultiplier) {
@@ -160,12 +162,41 @@ public class ReplicationSourceWALReader extends Thread {
     }
   }
 
-  private WALEntryBatch readWALEntries(WALEntryStream entryStream) throws IOException {
-    WALEntryBatch batch = null;
-    while (entryStream.hasNext()) {
-      if (batch == null) {
-        batch = new WALEntryBatch(replicationBatchCountCapacity, entryStream.getCurrentPath());
+  private void updateBatch(WALEntryStream entryStream, WALEntryBatch batch) {
+    logMessage(batch);
+    batch.updatePosition(entryStream);
+    batch.setMoreEntries(!source.replicationQueueInfo.isQueueRecovered());
+  }
+
+  private void logMessage(WALEntryBatch batch) {
+    if (LOG.isTraceEnabled()) {
+      if (batch.isEmpty()) {
+        LOG.trace("Didn't read any new entries from WAL");
+      } else {
+        LOG.trace(String.format("Read %s WAL entries eligible for replication",
+          batch.getNbEntries()));
       }
+    }
+  }
+
+  private boolean isShippable(WALEntryBatch batch) {
+    return !batch.isEmpty() || checkIfWALRolled(batch) || !batch.hasMoreEntries();
+  }
+
+  private boolean checkIfWALRolled(WALEntryBatch batch) {
+    return lastReadPath == null && batch.lastWalPath != null
+      || lastReadPath != null && !lastReadPath.equals(batch.lastWalPath);
+  }
+
+  private void resetStream(WALEntryStream stream) throws IOException {
+    lastReadPosition = stream.getPosition();
+    lastReadPath = stream.getCurrentPath();
+    stream.reset(); // reuse stream
+  }
+
+  private WALEntryBatch readWALEntries(WALEntryStream entryStream) throws IOException {
+    WALEntryBatch batch = new WALEntryBatch(replicationBatchCountCapacity, entryStream.getCurrentPath());
+    while (entryStream.hasNext()) {
       Entry entry = entryStream.next();
       entry = filterEntry(entry);
       if (entry != null) {
@@ -201,8 +232,8 @@ public class ReplicationSourceWALReader extends Thread {
       try {
         if (fs.getFileStatus(logQueue.peek()).getLen() == 0) {
           LOG.warn("Forcing removal of 0 length log in queue: " + logQueue.peek());
-          logQueue.remove();
-          currentPosition = 0;
+          lastReadPath =  logQueue.remove();
+          lastReadPosition = 0;
         }
       } catch (IOException ioe) {
         LOG.warn("Couldn't get file length information about log " + logQueue.peek());
@@ -356,6 +387,10 @@ public class ReplicationSourceWALReader extends Thread {
     this.isReaderRunning = readerRunning;
   }
 
+  public long getLastReadPosition() {
+    return this.lastReadPosition;
+  }
+
   /**
    * Holds a batch of WAL entries to replicate, along with some statistics
    *
@@ -372,6 +407,9 @@ public class ReplicationSourceWALReader extends Thread {
     private int nbHFiles = 0;
     // heap size of data we need to replicate
     private long heapSize = 0;
+    // whether more entries to read exist in WALs or not
+    private boolean moreEntries = true;
+
 
     /**
      * @param walEntries
@@ -450,6 +488,23 @@ public class ReplicationSourceWALReader extends Thread {
 
     private void incrementHeapSize(long increment) {
       heapSize += increment;
+    }
+
+    public boolean isEmpty() {
+      return walEntries.isEmpty();
+    }
+
+    public void updatePosition(WALEntryStream entryStream) {
+      lastWalPath = entryStream.getCurrentPath();
+      lastWalPosition = entryStream.getPosition();
+    }
+
+    public boolean hasMoreEntries() {
+      return moreEntries;
+    }
+
+    public void setMoreEntries(boolean moreEntries) {
+      this.moreEntries = moreEntries;
     }
   }
 }
