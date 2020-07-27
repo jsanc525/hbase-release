@@ -81,6 +81,15 @@ public class HFileLink extends FileLink {
       HRegionInfo.ENCODED_REGION_NAME_REGEX, StoreFileInfo.HFILE_NAME_REGEX));
 
   /**
+   * Define the MOB HFile Link name parser in the form of: table=mobregion-mobfilename_tableregion
+   */
+  static final Pattern MOB_LINK_NAME_PATTERN = Pattern.compile(String
+      .format("^(?:(%s)(?:\\=))?(%s)=(%s)-(%s)_(%s)$", TableName.VALID_NAMESPACE_REGEX,
+          TableName.VALID_TABLE_QUALIFIER_REGEX, HRegionInfo.ENCODED_REGION_NAME_REGEX,
+          HRegionInfo.ENCODED_REGION_NAME_REGEX, HRegionInfo.ENCODED_REGION_NAME_REGEX));
+
+
+  /**
    * The pattern should be used for hfile and reference links
    * that can be found in /hbase/table/region/family/
    */
@@ -195,6 +204,15 @@ public class HFileLink extends FileLink {
    */
   public static boolean isHFileLink(final Path path) {
     return isHFileLink(path.getName());
+  }
+
+  /**
+   * @param path Path to check.
+   * @return True if the path is a MobHFileLink.
+   */
+  public static boolean isMobHFileLink(final Path path) {
+    Matcher m = MOB_LINK_NAME_PATTERN.matcher(path.getName());
+    return m.matches();
   }
 
 

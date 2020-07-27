@@ -476,8 +476,8 @@ public class StoreFileInfo {
    * @return <tt>true</tt> if the file could be a valid store file, <tt>false</tt> otherwise
    */
   public static boolean validateStoreFileName(final String fileName) {
-    if (HFileLink.isHFileLink(fileName) || isReference(fileName))
-      return(true);
+    if (HFileLink.isHFileLink(fileName) || isReference(fileName) || HFileLink
+        .isMobHFileLink(new Path(fileName))) return (true);
     return !fileName.contains("-");
   }
 

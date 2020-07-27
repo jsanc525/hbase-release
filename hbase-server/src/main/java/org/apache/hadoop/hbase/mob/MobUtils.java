@@ -808,6 +808,9 @@ public class MobUtils {
       List<Path> regionDirs = FSUtils.getRegionDirs(FileSystem.get(conf), tableDir);
 
       Set<String> allActiveMobFileName = new HashSet<String>();
+      Set<String> regionWithHLinks = new HashSet<String>();
+      String region;
+      long startTime = System.currentTimeMillis();
       FileSystem fs = FileSystem.get(conf);
       for (Path regionPath: regionDirs) {
         for (HColumnDescriptor hcd: list) {
@@ -822,6 +825,12 @@ public class MobUtils {
             // Load list of store files first
             while(rit.hasNext()) {
               Path p = rit.next().getPath();
+              if (HFileLink.isHFileLink(p)) {
+                region = HFileLink.getReferencedRegionName(p.getName());
+                if (!regionWithHLinks.contains(region)) {
+                  regionWithHLinks.add(region);
+                }
+              }
               if (fs.isFile(p)) {
                 storeFiles.add(p);
               }
@@ -842,6 +851,7 @@ public class MobUtils {
                 }
                 String[] mobs = new String(mobRefData).split(",");
                 regionMobs.addAll(Arrays.asList(mobs));
+                sf.closeReader(false);
               }
             } catch (FileNotFoundException e) {
               //TODO
@@ -867,7 +877,21 @@ public class MobUtils {
           while(rit.hasNext()) {
             LocatedFileStatus lfs = rit.next();
             Path p = lfs.getPath();
-            if (!allActiveMobFileName.contains(p.getName())) {
+            boolean isActiveLink = false;
+            if (HFileLink.isMobHFileLink(p)) {
+              //<mobfilename>_<reference table region>
+              //i.e c4ca4238a0b923820dcc509a6f75849b2020061264e832256fdf439f8965bccf94376077_50ae9185a675bab284e3bcc378cb368f
+              String referencedRegion = HFileLink.getReferencedHFileName(p.getName()).split("_")[1];
+              String mobfile = HFileLink.getReferencedHFileName(p.getName());
+              isActiveLink = regionWithHLinks.contains(referencedRegion) || allActiveMobFileName.contains(mobfile);
+              if (isActiveLink) {
+                LOG.debug("Skipping moblink '"+p+"' is referenced in table location");
+              }
+            }
+            long currentTime = System.currentTimeMillis();
+            //The files should be written prior to hdfs listing.
+            boolean isElapsed = (currentTime - lfs.getModificationTime()) < startTime;
+            if (!allActiveMobFileName.contains(p.getName()) && !isActiveLink && isElapsed) {
               // MOB is not in a list of active references, but it can be too
               // fresh, skip it in this case
               /*DEBUG*/ LOG.debug("DDDD Age=" + (now - fs.getFileStatus(p).getModificationTime()) +
