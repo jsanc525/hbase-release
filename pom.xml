@@ -1365,7 +1365,7 @@
     <assembly.file>src/main/assembly/hadoop-two-compat.xml</assembly.file>
     <audience-annotations.version>0.5.0</audience-annotations.version>
     <!-- end HBASE-15925 default hadoop compatibility values -->
-    <spark.version>2.3.2.3.1.4.0-314</spark.version>
+    <spark.version>2.3.2.3.1.4.0-315</spark.version>
     <scala.version>2.11.8</scala.version>
     <scala.binary.version>2.11</scala.binary.version>
     <avro.version>1.7.7</avro.version>
